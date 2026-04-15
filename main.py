@@ -5,47 +5,39 @@ import time
 from telebot import types
 from flask import Flask, request
 
-# --- الإعدادات الأساسية ---
-TOKEN = os.getenv("TOKEN") 
+# --- 1. الإعدادات الأساسية ---
+TOKEN = os.getenv("TOKEN")
 ADMIN_ID = 8426760652
 DATA_FILE = "data.json"
 
-bot = telebot.TeleBot(TOKEN, threaded=False)
+# تعريف التطبيق للسيرفر (هذا هو الـ app اللي كان ناقص)
 app = Flask(__name__)
+bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# --- نظام إدارة البيانات ---
+# --- 2. نظام إدارة البيانات ---
 def load_data():
-    try:
-        if os.path.exists(DATA_FILE):
+    if os.path.exists(DATA_FILE):
+        try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                content = f.read()
-                return json.loads(content) if content else create_default_data()
-    except Exception as e:
-        print(f"Error loading data: {e}")
-    return create_default_data()
-
-def create_default_data():
+                return json.load(f)
+        except:
+            pass
     return {
         "structure": {},
-        "settings": {"start_msg": "👋 أهلاً بكم في بوت جامعة سنار - مكتبة الدفعة"},
-        "users": {}, # لتخزين المشتركين
+        "settings": {"start_msg": "👋 أهلاً بكم في بوت مكتبة الدفعة - جامعة سنار"},
+        "users": {},
         "admins": [ADMIN_ID]
     }
 
 def save_data(data):
-    try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"Error saving data: {e}")
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 user_path = {}
 
-# --- دوال المساعدة ---
+# --- 3. لوحة المفاتيح ---
 def main_keyboard(user_id, path=[]):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
-    # جلب الأقسام الحالية
     data = load_data()
     curr = data["structure"]
     for folder in path:
@@ -54,22 +46,18 @@ def main_keyboard(user_id, path=[]):
     for btn_name in curr.keys():
         markup.add(types.KeyboardButton(btn_name))
 
-    # أزرار التنقل
-    nav_btns = []
+    nav = []
     if path:
-        nav_btns.append(types.KeyboardButton("⬅️ رجوع"))
-        nav_btns.append(types.KeyboardButton("🏠 الرئيسية"))
-    nav_btns.append(types.KeyboardButton("🔄 إنعاش البوت"))
-    markup.add(*nav_btns)
+        nav.extend([types.KeyboardButton("⬅️ رجوع"), types.KeyboardButton("🏠 الرئيسية")])
+    nav.append(types.KeyboardButton("🔄 إنعاش"))
+    markup.add(*nav)
 
-    # أزرار الأدمن
     if user_id == ADMIN_ID:
-        markup.add(types.KeyboardButton("➕ إضافة قسم"), types.KeyboardButton("📥 إضافة محتوى هنا"))
+        markup.add(types.KeyboardButton("➕ إضافة قسم"), types.KeyboardButton("📥 إضافة محتوى"))
         markup.add(types.KeyboardButton("🔐 الإدارة"))
-
     return markup
 
-# --- Webhook Setup ---
+# --- 4. إعدادات السيرفر (Webhook) ---
 @app.route('/' + (TOKEN if TOKEN else "webhook"), methods=['POST'])
 def receive_update():
     if request.headers.get('content-type') == 'application/json':
@@ -82,109 +70,60 @@ def receive_update():
 @app.route("/")
 def webhook_setup():
     app_url = os.getenv('APP_URL')
-    if app_url and TOKEN:
+    if app_url:
         bot.remove_webhook()
-        time.sleep(1) # تأخير بسيط لضمان المسح
-        bot.set_webhook(url=f"https://{app_url}/{TOKEN}")
+        time.sleep(1)
+        # التأكد من صياغة الرابط بشكل صحيح
+        clean_url = app_url.replace("https://", "").replace("http://", "").rstrip('/')
+        bot.set_webhook(url=f"https://{clean_url}/{TOKEN}")
         return "✅ تم ربط الـ Webhook بنجاح!", 200
-    return "❌ خطأ: APP_URL أو TOKEN غير معرف", 400
+    return "❌ أضف رابط الـ APP_URL في إعدادات ريندر", 400
 
-# --- الأوامر الأساسية ---
-@bot.message_handler(func=lambda m: m.text in ["/start", "🔄 إنعاش البوت", "🏠 الرئيسية"])
-def start(message):
-    user_id = str(message.from_user.id)
-    user_path[message.chat.id] = []
-    
-    data = load_data()
-    # تسجيل المستخدم إذا لم يكن موجوداً
-    if user_id not in data["users"]:
-        data["users"][user_id] = {
-            "name": message.from_user.first_name,
-            "username": message.from_user.username,
-            "joined": time.strftime("%Y-%m-%d")
-        }
-        save_data(data)
-    
-    bot.send_message(
-        message.chat.id, 
-        data["settings"]["start_msg"], 
-        reply_markup=main_keyboard(message.from_user.id, [])
-    )
-
+# --- 5. أوامر الإدارة والإحصائيات ---
 @bot.message_handler(func=lambda m: m.text == "🔐 الإدارة")
-def admin_panel(message):
+def admin_menu(message):
     if message.from_user.id == ADMIN_ID:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("📊 الإحصائيات", "📢 إعلان للكل")
-        markup.add("🏠 الرئيسية")
-        bot.send_message(message.chat.id, "👑 مرحباً بك في لوحة تحكم المالك", reply_markup=markup)
+        markup.add("📊 الإحصائيات", "📢 إذاعة للكل", "🏠 الرئيسية")
+        bot.send_message(message.chat.id, "👑 لوحة تحكم المالك", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: m.text == "📊 الإحصائيات")
-def statistics(message):
+def stats(message):
     if message.from_user.id == ADMIN_ID:
         data = load_data()
-        users = data.get("users", {})
-        total = len(users)
-        msg = f"📊 **إحصائيات البوت الحالية:**\n\n"
-        msg += f"👥 إجمالي الطلاب المشتركين: {total}\n"
-        msg += "--- آخر 5 منضمين ---\n"
-        for uid in list(users.keys())[-5:]:
-            msg += f"- {users[uid]['name']} (@{users[uid].get('username', 'None')})\n"
-        bot.send_message(message.chat.id, msg)
+        total = len(data.get("users", {}))
+        bot.send_message(message.chat.id, f"👥 عدد الطلاب المشتركين: {total}")
 
-@bot.message_handler(func=lambda m: m.text == "📢 إعلان للكل")
-def broadcast_hint(message):
+@bot.message_handler(func=lambda m: m.text == "📢 إذاعة للكل")
+def broadcast(message):
     if message.from_user.id == ADMIN_ID:
-        msg = bot.send_message(message.chat.id, "📝 أرسل الآن الرسالة التي تريد إذاعتها لكل الطلاب (نص فقط):")
-        bot.register_next_step_handler(msg, perform_broadcast)
+        msg = bot.send_message(message.chat.id, "📝 أرسل الإعلان الآن:")
+        bot.register_next_step_handler(msg, send_to_all)
 
-def perform_broadcast(message):
-    if message.text == "🏠 الرئيسية": return
+def send_to_all(message):
     data = load_data()
     users = data.get("users", {})
-    success = 0
-    fail = 0
-    
-    bot.send_message(message.chat.id, f"⏳ جاري الإرسال إلى {len(users)} مستخدم...")
-    
+    count = 0
     for user_id in users:
         try:
-            bot.send_message(user_id, f"📢 **إعلان من إدارة البوت:**\n\n{message.text}")
-            success += 1
-            time.sleep(0.05) # حماية من الحظر (Flood)
-        except:
-            fail += 1
-    
-    bot.send_message(message.chat.id, f"✅ تم الإرسال بنجاح: {success}\n❌ فشل الإرسال (بوت محظور): {fail}")
+            bot.send_message(user_id, f"📢 **إعلان مهم:**\n\n{message.text}")
+            count += 1
+        except: pass
+    bot.send_message(message.chat.id, f"✅ تم الإرسال لـ {count} طالب")
 
-# --- معالجة الملفات (رفع المحتوى) ---
-@bot.message_handler(content_types=['document', 'photo', 'video', 'audio'])
-def handle_docs(message):
-    if message.from_user.id != ADMIN_ID: return
-    
-    path = user_path.get(message.chat.id, [])
+# --- 6. الأوامر العامة ---
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = str(message.from_user.id)
     data = load_data()
-    curr = data["structure"]
-    
-    try:
-        for folder in path:
-            curr = curr[folder]
-        if "files" not in curr: curr["files"] = []
-        
-        # تحديد نوع الملف والـ ID
-        f_type = message.content_type
-        f_id = getattr(message, f_type).file_id if f_type != 'photo' else message.photo[-1].file_id
-        
-        curr["files"].append({
-            "type": f_type,
-            "id": f_id,
-            "caption": message.caption or "بدون وصف"
-        })
+    if user_id not in data["users"]:
+        data["users"][user_id] = {"name": message.from_user.first_name}
         save_data(data)
-        bot.reply_to(message, "✅ تم حفظ الملف في هذا القسم بنجاح!")
-    except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ أثناء الحفظ: {e}")
+    
+    user_path[message.chat.id] = []
+    bot.send_message(message.chat.id, data["settings"]["start_msg"], 
+                     reply_markup=main_keyboard(message.from_user.id))
 
 # تشغيل السيرفر
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
